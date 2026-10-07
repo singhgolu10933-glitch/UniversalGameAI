@@ -2,6 +2,7 @@ package com.universalgameai
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
@@ -18,7 +19,6 @@ class MainActivity : Activity() {
     companion object {
         private const val SCREEN_CAPTURE_REQUEST = 1001
         private const val NOTIFICATION_REQUEST = 1002
-
         private const val METRICS_INTERVAL_MS = 500L
     }
 
@@ -42,7 +42,6 @@ class MainActivity : Activity() {
         object : Runnable {
 
             override fun run() {
-
                 updateMetrics()
 
                 metricsHandler.postDelayed(
@@ -57,15 +56,25 @@ class MainActivity : Activity() {
     ) {
         super.onCreate(savedInstanceState)
 
+        /*
+         * Install crash logger as early as possible.
+         */
+        CrashLogger.install(this)
+
         setContentView(
             R.layout.activity_main
         )
 
         bindViews()
-
         setupButtons()
 
         requestNotificationPermissionIfNeeded()
+
+        /*
+         * If the previous run crashed, show the actual
+         * exception after the app is reopened.
+         */
+        showPreviousCrashIfAvailable()
 
         metricsHandler.post(
             metricsRunnable
@@ -144,21 +153,35 @@ class MainActivity : Activity() {
 
     private fun requestScreenCapture() {
 
-        val projectionManager =
-            getSystemService(
-                MEDIA_PROJECTION_SERVICE
-            ) as MediaProjectionManager
+        try {
 
-        val captureIntent =
-            projectionManager.createScreenCaptureIntent()
+            val projectionManager =
+                getSystemService(
+                    MEDIA_PROJECTION_SERVICE
+                ) as MediaProjectionManager
 
-        statusText.text =
-            "● WAITING FOR PERMISSION"
+            val captureIntent =
+                projectionManager
+                    .createScreenCaptureIntent()
 
-        startActivityForResult(
-            captureIntent,
-            SCREEN_CAPTURE_REQUEST
-        )
+            statusText.text =
+                "● WAITING FOR PERMISSION"
+
+            startActivityForResult(
+                captureIntent,
+                SCREEN_CAPTURE_REQUEST
+            )
+
+        } catch (error: Exception) {
+
+            statusText.text =
+                "● CAPTURE REQUEST FAILED"
+
+            showError(
+                "Screen capture request failed",
+                error
+            )
+        }
     }
 
     @Deprecated("Uses legacy activity result API")
@@ -195,24 +218,24 @@ class MainActivity : Activity() {
             return
         }
 
-        val serviceIntent =
-            Intent(
-                this,
-                ScreenCaptureService::class.java
-            ).apply {
-
-                putExtra(
-                    ScreenCaptureServiceContract.RESULT_CODE,
-                    resultCode
-                )
-
-                putExtra(
-                    ScreenCaptureServiceContract.DATA_INTENT,
-                    data
-                )
-            }
-
         try {
+
+            val serviceIntent =
+                Intent(
+                    this,
+                    ScreenCaptureService::class.java
+                ).apply {
+
+                    putExtra(
+                        ScreenCaptureServiceContract.RESULT_CODE,
+                        resultCode
+                    )
+
+                    putExtra(
+                        ScreenCaptureServiceContract.DATA_INTENT,
+                        data
+                    )
+                }
 
             if (
                 Build.VERSION.SDK_INT >=
@@ -239,10 +262,15 @@ class MainActivity : Activity() {
         } catch (error: Exception) {
 
             statusText.text =
-                "● START FAILED: ${error.javaClass.simpleName}"
+                "● START FAILED"
 
             startButton.isEnabled = true
             stopButton.isEnabled = false
+
+            showError(
+                "Could not start capture service",
+                error
+            )
         }
     }
 
@@ -254,9 +282,7 @@ class MainActivity : Activity() {
                 ScreenCaptureService::class.java
             )
 
-        stopService(
-            serviceIntent
-        )
+        stopService(serviceIntent)
 
         statusText.text =
             "● OBSERVATION STOPPED"
@@ -282,25 +308,29 @@ class MainActivity : Activity() {
 
         } else {
 
-            /*
-             * Don't overwrite a temporary starting/permission
-             * message too aggressively.
-             */
+            startButton.isEnabled = true
+            stopButton.isEnabled = false
+
             if (
-                !statusText.text
+                statusText.text
                     .toString()
-                    .contains("PERMISSION") &&
-                !statusText.text
+                    .contains("STARTING")
+            ) {
+                /*
+                 * Leave the starting message briefly.
+                 */
+            } else if (
+                statusText.text
                     .toString()
                     .contains("FAILED")
             ) {
-
+                /*
+                 * Keep failure state visible.
+                 */
+            } else {
                 statusText.text =
                     "● READY"
             }
-
-            startButton.isEnabled = true
-            stopButton.isEnabled = false
         }
 
         val width =
@@ -310,12 +340,12 @@ class MainActivity : Activity() {
             ScreenCaptureService.capturedHeight
 
         resolutionText.text =
-            if (width > 0 && height > 0) {
-
-                "Resolution: ${width} × ${height}"
-
+            if (
+                width > 0 &&
+                height > 0
+            ) {
+                "Resolution: $width × $height"
             } else {
-
                 "Resolution: --"
             }
 
@@ -324,11 +354,9 @@ class MainActivity : Activity() {
 
         fpsText.text =
             if (fps > 0.0) {
-
-                "Capture FPS: %.2f".format(fps)
-
+                "Capture FPS: %.2f"
+                    .format(fps)
             } else {
-
                 "Capture FPS: --"
             }
 
@@ -337,12 +365,9 @@ class MainActivity : Activity() {
 
         latencyText.text =
             if (latency > 0.0) {
-
                 "Frame latency: %.2f ms"
                     .format(latency)
-
             } else {
-
                 "Frame latency: --"
             }
 
@@ -354,21 +379,16 @@ class MainActivity : Activity() {
             "Analyzed frames: " +
                     ScreenCaptureService.analyzedFrames
 
-        val analyzed =
-            ScreenCaptureService.analyzedFrames > 0
-
         visionText.text =
-            if (analyzed) {
+            when {
+                ScreenCaptureService.analyzedFrames > 0 ->
+                    "Vision: ACTIVE"
 
-                "Vision: ACTIVE"
+                capturing ->
+                    "Vision: STARTING"
 
-            } else if (capturing) {
-
-                "Vision: STARTING"
-
-            } else {
-
-                "Vision: INACTIVE"
+                else ->
+                    "Vision: INACTIVE"
             }
 
         val state =
@@ -401,6 +421,51 @@ class MainActivity : Activity() {
 
                 "Vision processing: --"
             }
+    }
+
+    private fun showPreviousCrashIfAvailable() {
+
+        val crash =
+            CrashLogger.getLastError(this)
+                ?: return
+
+        /*
+         * Clear it immediately so the same crash isn't shown
+         * forever on every launch.
+         */
+        CrashLogger.clear(this)
+
+        AlertDialog.Builder(this)
+            .setTitle(
+                "UniversalGameAI Crash Detected"
+            )
+            .setMessage(crash)
+            .setPositiveButton(
+                "OK",
+                null
+            )
+            .setNegativeButton(
+                "Copy",
+                null
+            )
+            .show()
+    }
+
+    private fun showError(
+        title: String,
+        error: Throwable
+    ) {
+
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(
+                error.stackTraceToString()
+            )
+            .setPositiveButton(
+                "OK",
+                null
+            )
+            .show()
     }
 
     override fun onDestroy() {
