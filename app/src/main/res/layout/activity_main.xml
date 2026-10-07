@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="#0A0A0E">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:id="@+id/titleText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Universal Game AI"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:layout_marginTop="24dp"/>
+
+        <TextView
+            android:id="@+id/subtitleText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Universal Android Game Agent"
+            android:textColor="#AFAFB8"
+            android:textSize="15sp"
+            android:gravity="center"
+            android:layout_marginTop="8dp"/>
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="● READY"
+            android:textColor="#66FF99"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:layout_marginTop="36dp"/>
+
+        <TextView
+            android:id="@+id/resolutionText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Resolution: --"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:layout_marginTop="28dp"/>
+
+        <TextView
+            android:id="@+id/fpsText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Capture FPS: --"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:layout_marginTop="10dp"/>
+
+        <TextView
+            android:id="@+id/latencyText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Frame latency: --"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:layout_marginTop="10dp"/>
+
+        <TextView
+            android:id="@+id/frameText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Captured frames: 0"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:layout_marginTop="10dp"/>
+
+        <TextView
+            android:id="@+id/analyzedFrameText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Analyzed frames: 0"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:layout_marginTop="10dp"/>
+
+        <TextView
+            android:id="@+id/visionText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Vision: INACTIVE"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:layout_marginTop="10dp"/>
+
+        <TextView
+            android:id="@+id/gameStateText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Game state: UNKNOWN"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:layout_marginTop="10dp"/>
+
+        <TextView
+            android:id="@+id/analysisTimeText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Vision processing: --"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:layout_marginTop="10dp"/>
+
+        <Button
+            android:id="@+id/startButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="START OBSERVATION"
+            android:textSize="15sp"
+            android:layout_marginTop="32dp"/>
+
+        <Button
+            android:id="@+id/stopButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="STOP OBSERVATION"
+            android:textSize="15sp"
+            android:enabled="false"
+            android:layout_marginTop="12dp"/>
+
+    </LinearLayout>
+
+</ScrollView>
