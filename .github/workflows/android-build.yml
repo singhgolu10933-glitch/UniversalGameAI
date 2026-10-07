@@ -1,4 +1,4 @@
-pname: UniversalGameAI Build
+name: UniversalGameAI Build
 
 on:
   push:
