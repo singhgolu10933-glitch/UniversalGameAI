@@ -20,40 +20,61 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Process
 import com.universalgameai.ScreenCaptureServiceContract
+import com.universalgameai.model.GameState
+import com.universalgameai.vision.FrameConverter
+import com.universalgameai.vision.VisionEngine
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 
 class ScreenCaptureService : Service() {
 
     companion object {
-        private const val CHANNEL_ID = "universal_game_ai_capture"
-        private const val CHANNEL_NAME = "Game AI Screen Capture"
+
+        private const val CHANNEL_ID =
+            "universal_game_ai_capture"
+
+        private const val CHANNEL_NAME =
+            "Game AI Screen Capture"
+
         private const val NOTIFICATION_ID = 1001
 
-        private const val IMAGE_FORMAT = PixelFormat.RGBA_8888
+        private const val IMAGE_FORMAT =
+            PixelFormat.RGBA_8888
 
         @Volatile
-        var isCapturing: Boolean = false
+        var isCapturing = false
             private set
 
         @Volatile
-        var capturedWidth: Int = 0
+        var capturedWidth = 0
             private set
 
         @Volatile
-        var capturedHeight: Int = 0
+        var capturedHeight = 0
             private set
 
         @Volatile
-        var measuredFps: Double = 0.0
+        var measuredFps = 0.0
             private set
 
         @Volatile
-        var frameLatencyMs: Double = 0.0
+        var frameLatencyMs = 0.0
             private set
 
         @Volatile
-        var totalFrames: Long = 0L
+        var totalFrames = 0L
+            private set
+
+        @Volatile
+        var analyzedFrames = 0L
+            private set
+
+        @Volatile
+        var lastAnalysisTimeMs = 0.0
+            private set
+
+        @Volatile
+        var latestGameState: GameState? = null
             private set
     }
 
@@ -66,26 +87,32 @@ class ScreenCaptureService : Service() {
 
     private val running = AtomicBoolean(false)
 
+    private val visionEngine =
+        VisionEngine()
+
     private var lastFrameTimeNs = 0L
 
     private var fpsWindowStartNs = 0L
     private var fpsWindowFrames = 0L
 
-    private var projectionCallback: MediaProjection.Callback? = null
+    private var projectionCallback:
+        MediaProjection.Callback? = null
 
     override fun onCreate() {
         super.onCreate()
 
         createNotificationChannel()
 
-        captureThread = HandlerThread(
-            "UGAI-ScreenCapture",
-            Process.THREAD_PRIORITY_DISPLAY
-        )
+        captureThread =
+            HandlerThread(
+                "UGAI-ScreenCapture",
+                Process.THREAD_PRIORITY_DISPLAY
+            )
 
         captureThread.start()
 
-        captureHandler = Handler(captureThread.looper)
+        captureHandler =
+            Handler(captureThread.looper)
     }
 
     override fun onStartCommand(
@@ -112,7 +139,10 @@ class ScreenCaptureService : Service() {
                 ScreenCaptureServiceContract.DATA_INTENT
             )
 
-        if (resultCode < 0 || projectionData == null) {
+        if (
+            resultCode < 0 ||
+            projectionData == null
+        ) {
             stopCapture()
             stopSelf()
             return START_NOT_STICKY
@@ -215,9 +245,17 @@ class ScreenCaptureService : Service() {
         lastFrameTimeNs = 0L
         fpsWindowStartNs = System.nanoTime()
         fpsWindowFrames = 0L
+
         totalFrames = 0L
+        analyzedFrames = 0L
+
         measuredFps = 0.0
         frameLatencyMs = 0.0
+        lastAnalysisTimeMs = 0.0
+
+        latestGameState = null
+
+        visionEngine.reset()
     }
 
     private fun processLatestImage(
@@ -229,113 +267,181 @@ class ScreenCaptureService : Service() {
         }
 
         var image: Image? = null
+        var bitmap = null as android.graphics.Bitmap?
 
         try {
 
             /*
-             * acquireLatestImage() intentionally drops old frames.
-             *
-             * This keeps the AI pipeline focused on the newest
-             * game state instead of processing a growing backlog.
+             * Always take the newest frame.
+             * Old queued frames are intentionally discarded.
              */
-            image = reader.acquireLatestImage()
+            image =
+                reader.acquireLatestImage()
 
             if (image == null) {
                 return
             }
 
-            val nowNs = System.nanoTime()
+            val nowNs =
+                System.nanoTime()
 
-            if (lastFrameTimeNs != 0L) {
-
-                val deltaNs =
-                    nowNs - lastFrameTimeNs
-
-                if (deltaNs > 0L) {
-
-                    val instantFps =
-                        1_000_000_000.0 / deltaNs
-
-                    measuredFps =
-                        if (measuredFps == 0.0) {
-                            instantFps
-                        } else {
-                            measuredFps * 0.85 +
-                                    instantFps * 0.15
-                        }
-                }
-            }
-
-            lastFrameTimeNs = nowNs
-
-            totalFrames++
-            fpsWindowFrames++
+            updateFrameMetrics(
+                nowNs,
+                image
+            )
 
             /*
-             * Image timestamp is supplied by Android's
-             * capture pipeline. It lets us estimate how old
-             * the captured frame is when it reaches us.
+             * REAL FRAME CONVERSION
              */
-            val imageTimestampNs =
-                image.timestamp
+            bitmap =
+                FrameConverter.imageToBitmap(
+                    image
+                )
 
-            if (imageTimestampNs > 0L &&
-                nowNs >= imageTimestampNs
-            ) {
-
-                frameLatencyMs =
-                    (nowNs - imageTimestampNs) / 1_000_000.0
+            if (bitmap == null) {
+                return
             }
 
-            updateWindowedFps(nowNs)
+            /*
+             * Resize only for vision processing.
+             * The original capture resolution remains
+             * available through capturedWidth/Height.
+             */
+            val visionBitmap =
+                FrameConverter.resizeForVision(
+                    bitmap,
+                    maxWidth = 640,
+                    maxHeight = 640
+                )
+
+            val analysisStartNs =
+                System.nanoTime()
 
             /*
-             * IMPORTANT:
-             *
-             * This is the point where the actual frame will
-             * later be passed to VisionEngine.
-             *
-             * We are deliberately not calling an external AI
-             * API for every frame.
-             *
-             * For this first milestone we only prove that
-             * real Android screen frames are being captured.
+             * REAL LOCAL VISION ANALYSIS
              */
+            val visionResult =
+                visionEngine.analyze(
+                    visionBitmap
+                )
+
+            val analysisEndNs =
+                System.nanoTime()
+
+            lastAnalysisTimeMs =
+                (
+                    analysisEndNs -
+                            analysisStartNs
+                    ) / 1_000_000.0
+
+            /*
+             * REAL GAME STATE CREATION
+             */
+            latestGameState =
+                GameState.fromVision(
+                    visionResult
+                )
+
+            analyzedFrames++
+
+            /*
+             * resizeForVision() can return a copy or a
+             * newly-created scaled bitmap. Release it here.
+             */
+            if (visionBitmap !== bitmap) {
+                visionBitmap.recycle()
+            }
+
         } catch (_: Exception) {
+
             /*
-             * A frame can become invalid while the projection
-             * is being stopped. The service itself handles
-             * shutdown separately.
+             * Projection shutdown and device display changes
+             * can invalidate an Image. We intentionally keep
+             * the capture service alive when one frame fails.
              */
+
         } finally {
+
+            bitmap?.recycle()
+
             image?.close()
         }
+    }
+
+    private fun updateFrameMetrics(
+        nowNs: Long,
+        image: Image
+    ) {
+
+        if (lastFrameTimeNs != 0L) {
+
+            val deltaNs =
+                nowNs - lastFrameTimeNs
+
+            if (deltaNs > 0L) {
+
+                val instantFps =
+                    1_000_000_000.0 /
+                            deltaNs
+
+                measuredFps =
+                    if (measuredFps == 0.0) {
+                        instantFps
+                    } else {
+                        measuredFps * 0.85 +
+                                instantFps * 0.15
+                    }
+            }
+        }
+
+        lastFrameTimeNs = nowNs
+
+        totalFrames++
+        fpsWindowFrames++
+
+        /*
+         * Image timestamp is generated by the Android
+         * graphics pipeline.
+         */
+        val imageTimestampNs =
+            image.timestamp
+
+        if (
+            imageTimestampNs > 0L &&
+            nowNs >= imageTimestampNs
+        ) {
+
+            frameLatencyMs =
+                (
+                    nowNs -
+                            imageTimestampNs
+                    ) / 1_000_000.0
+        }
+
+        updateWindowedFps(nowNs)
     }
 
     private fun updateWindowedFps(
         nowNs: Long
     ) {
 
-        if (fpsWindowStartNs == 0L) {
-            fpsWindowStartNs = nowNs
-            return
-        }
-
         val elapsedNs =
             nowNs - fpsWindowStartNs
 
-        /*
-         * Recalculate the stable FPS approximately once
-         * per second.
-         */
-        if (elapsedNs >= 1_000_000_000L) {
+        if (
+            elapsedNs >=
+            1_000_000_000L
+        ) {
 
-            val elapsedSeconds =
-                elapsedNs / 1_000_000_000.0
+            val seconds =
+                elapsedNs /
+                        1_000_000_000.0
 
-            if (elapsedSeconds > 0.0) {
+            if (seconds > 0.0) {
+
                 measuredFps =
-                    fpsWindowFrames / elapsedSeconds
+                    fpsWindowFrames /
+                            seconds
             }
 
             fpsWindowStartNs = nowNs
@@ -388,6 +494,10 @@ class ScreenCaptureService : Service() {
         }
 
         mediaProjection = null
+
+        visionEngine.reset()
+
+        latestGameState = null
     }
 
     private fun startForegroundServiceNotification() {
@@ -409,12 +519,16 @@ class ScreenCaptureService : Service() {
                 .setOngoing(true)
                 .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.Q
+        ) {
 
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                ServiceInfo
+                    .FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
             )
 
         } else {
@@ -428,7 +542,8 @@ class ScreenCaptureService : Service() {
 
     private fun createNotificationChannel() {
 
-        if (Build.VERSION.SDK_INT <
+        if (
+            Build.VERSION.SDK_INT <
             Build.VERSION_CODES.O
         ) {
             return
